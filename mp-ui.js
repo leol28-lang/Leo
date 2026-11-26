@@ -1,0 +1,40 @@
+const src = require('fs').readFileSync(__dirname + '/mp-two-clients.js','utf8');
+// reuse helpers by evaluating test file up to the main IIFE
+const head = src.split("(async () => {")[0];
+eval(head + `
+(async () => {
+  const H = makeClient('host'), G = makeClient('guest');
+  const ui = [];
+  const run = (l, f) => { try { const v = f(); ui.push(['PASS', l, v === undefined ? '' : JSON.stringify(v)]); } catch (e) { ui.push(['FAIL', l, e.message]); } };
+  H.setVal('mpName','房主'); await H.R('mpCreate()');
+  run('host opens panel', () => H.R("mpOpenPanel(); $('mpPanel').classList.contains('hidden')"));
+  run('host panel shows room', () => H.R("!$('mpRoom').classList.contains('hidden') && $('mpCodeBig').textContent.length===4"));
+  run('host map options', () => H.R("$('mpMap').innerHTML.includes('翠绿草原')"));
+  run('host seat buttons', () => H.R("$('mpSeats').innerHTML.includes('data-state')"));
+  const code = H.R('MP.code');
+  G.setVal('mpName','小红'); G.setVal('mpCode', code); await G.R('mpJoin()');
+  await H.tick(); await G.tick();
+  run('badge text', () => H.R("$('mpBadge').textContent"));
+  run('guest panel no host controls', () => G.R("$('mpHostCtl').classList.contains('hidden') && $('mpStart').classList.contains('hidden')"));
+  run('guest seats render', () => G.R("mpRenderPanel(); $('mpSeats').innerHTML.includes('小红')"));
+  await H.R("mpStartGame()"); await G.tick();
+  run('host ghosts draw with other hover', () => { H.R("MP.hovers=[{r:2,c:3,ty:'arrow',seat:1}]; mpDrawGhosts(); draw();"); return true; });
+  run('guest ghosts draw', () => { G.R("MP.hovers=[{r:2,c:3,ty:'arrow',seat:0}]; mpDrawGhosts();"); return true; });
+  run('guest tap-on-path blocked locally', () => G.R("handleTap({r:0,c:0}, true); true"));
+  run('guest pause sends action', () => { G.R('togglePause()'); return true; });
+  await new Promise(r=>setTimeout(r,80)); await H.tick();
+  run('host paused via guest request', () => H.R('S.paused') === true);
+  run('guest sync paused', () => { G.R('mpTick'); return true; });
+  await G.tick();
+  run('guest sees paused', () => G.R('S.paused') === true);
+  run('guest speed request', () => { G.R("$('speedBtn').onclick()"); return true; });
+  await new Promise(r=>setTimeout(r,80)); await H.tick();
+  run('host speed changed', () => H.R('S.speed') === 2);
+  await G.R('mpLeave()');
+  run('guest left', () => G.R('MP.code') === null && G.R("$('mpBadge').classList.contains('hidden')"));
+  run('host sees 1 human after guest leaves', () => { return H.R('mpHumanCount()'); });
+  await H.R('mpLeave()');
+  for (const r of ui) console.log(r[0], r[1], r[2]);
+  console.log(ui.filter(r=>r[0]==='FAIL').length ? 'UI FAILS' : 'UI ALL PASS');
+})().catch(e => { console.error('CRASH', e); process.exit(1); });
+`);
